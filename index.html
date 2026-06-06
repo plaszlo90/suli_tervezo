@@ -341,6 +341,9 @@
   }
   .status-done { border-color: var(--green); background: var(--green-bg); color: var(--green-text); }
   .status-folyamat { border-color: var(--amber); background: var(--amber-bg); color: var(--amber-text); }
+  .status-skip { border-color: var(--border2); background: var(--surface2); color: var(--text3); }
+  tr.skipped td { opacity: 0.3; }
+  tr.skipped .nev-text { text-decoration: line-through; }
 
   .plan-toggle {
     width: 28px;
@@ -586,6 +589,7 @@
           <button class="chip" data-f="-1" onclick="setFelevFilter(-1,this)">Modul/Szab.</button>
         </div>
         <button class="chip" id="hideDoneChip" onclick="toggleHideDone()">✓ Teljesített elrejtése</button>
+        <button class="chip" id="hideSkipChip" onclick="toggleHideSkip()">⛔ Kihagyott elrejtése</button>
       </div>
 
       <div class="table-wrap">
@@ -745,20 +749,22 @@ const CATS = [
 
 let S = JSON.parse(localStorage.getItem('kme_v2_state')||'{}');
 let P = JSON.parse(localStorage.getItem('kme_v2_plan')||'[]');
-let felevF = 0, katF = '', hideDone = false, activePanel = 'osszes';
+let felevF = 0, katF = '', hideDone = false, hideSkip = false, activePanel = 'osszes';
 
 function save(){ try{localStorage.setItem('kme_v2_state',JSON.stringify(S));localStorage.setItem('kme_v2_plan',JSON.stringify(P));}catch(e){} }
 const isDone = k => S[k]==='done';
 const isFoly = k => S[k]==='folyamat';
+const isSkip = k => S[k]==='skip';
 const inPlan = k => P.includes(k);
 const preOk = t => t.pre.every(p=>isDone(p));
 const getT = k => T.find(x=>x.k===k);
 
 function cycleStatus(k){
   const cur = S[k]||'none';
-  S[k] = cur==='none'?'folyamat':cur==='folyamat'?'done':'none';
+  S[k] = cur==='none'?'folyamat':cur==='folyamat'?'done':cur==='done'?'skip':'none';
   save(); renderAll();
-  toast(isDone(k)?'✓ Teljesítve: '+getT(k).n:isFoly(k)?'Folyamatban: '+getT(k).n:'Visszaállítva');
+  const labels={'done':'✓ Teljesítve','folyamat':'⏳ Folyamatban','skip':'⛔ Nem veszem fel','none':'Visszaállítva'};
+  toast((labels[S[k]]||'Visszaállítva')+': '+getT(k).n);
 }
 
 function setStatus(k,val){ S[k]=val; save(); renderAll(); }
@@ -800,6 +806,12 @@ function toggleHideDone(){
   renderTable();
 }
 
+function toggleHideSkip(){
+  hideSkip=!hideSkip;
+  document.getElementById('hideSkipChip').classList.toggle('active',hideSkip);
+  renderTable();
+}
+
 function showPanel(name,label,btn){
   activePanel=name;
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -820,6 +832,7 @@ function renderTable(){
     else if(felevF===-1 && t.f!==0) return false;
     else if(felevF>0 && t.f!==felevF) return false;
     if(hideDone && isDone(t.k)) return false;
+    if(hideSkip && isSkip(t.k)) return false;
     if(q && !t.n.toLowerCase().includes(q) && !t.k.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -827,13 +840,14 @@ function renderTable(){
   const tb=document.getElementById('tableBody');
   if(!tb) return;
   tb.innerHTML=rows.map(t=>{
-    const done=isDone(t.k), foly=isFoly(t.k), ip=inPlan(t.k), ok=preOk(t);
+    const done=isDone(t.k), foly=isFoly(t.k), skip=isSkip(t.k), ip=inPlan(t.k), ok=preOk(t);
     const preHtml=t.pre.length?t.pre.map(p=>{
       const pt=getT(p); const pDone=isDone(p);
       return `<span class="${pDone?'':'pre-miss'}">${pt?pt.n.split(' ').slice(0,3).join(' '):p}</span>`;
     }).join(' · '):'';
-    const statClass=done?'status-done':foly?'status-folyamat':'';
-    return `<tr class="${done?'done':''}">
+    const statClass=done?'status-done':foly?'status-folyamat':skip?'status-skip':'';
+    const rowClass=done?'done':skip?'skipped':'';
+    return `<tr class="${rowClass}">
       <td class="col-check">
         <div class="cb ${done?'done':foly?'folyamat':''}" onclick="cycleStatus('${t.k}')" title="Kattints az állapot változtatásához">
           <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -841,7 +855,7 @@ function renderTable(){
       </td>
       <td class="col-nev">
         <div class="nev-cell">
-          <span class="nev-text">${t.n}</span>
+          <span class="nev-text">${skip?'⛔ ':''}<span style="${skip?'text-decoration:line-through;color:var(--text3)':''}">${t.n}</span></span>
           ${preHtml?`<span class="pre-text">${ok?'✓ ':''} ${preHtml}</span>`:''}
         </div>
       </td>
@@ -851,13 +865,14 @@ function renderTable(){
       <td class="col-felev" style="text-align:center;color:var(--text2)">${t.f||'–'}</td>
       <td class="col-allapot">
         <select class="status-sel ${statClass}" onchange="setStatus('${t.k}',this.value)">
-          <option value="none" ${!done&&!foly?'selected':''}>– Nem felvett</option>
+          <option value="none" ${!done&&!foly&&!skip?'selected':''}>– Nem felvett</option>
           <option value="folyamat" ${foly?'selected':''}>⏳ Folyamatban</option>
           <option value="done" ${done?'selected':''}>✓ Teljesítve</option>
+          <option value="skip" ${skip?'selected':''}>⛔ Nem veszem fel</option>
         </select>
       </td>
       <td class="col-terv">
-        <button class="plan-toggle ${ip?'active':''}" onclick="togglePlan('${t.k}')" title="${ip?'Eltávolítás a tervből':'Hozzáadás a tervhez'}">${ip?'★':'☆'}</button>
+        <button class="plan-toggle ${ip?'active':''}" onclick="togglePlan('${t.k}')" title="${ip?'Eltávolítás a tervből':'Hozzáadás a tervhez'}" ${skip?'disabled style="opacity:0.3;cursor:not-allowed"':''}>${ip?'★':'☆'}</button>
       </td>
     </tr>`;
   }).join('');
@@ -867,13 +882,25 @@ function renderTable(){
 function renderStats(){
   const doneKr=T.filter(t=>isDone(t.k)).reduce((s,t)=>s+t.kr,0);
   const doneCnt=T.filter(t=>isDone(t.k)).length;
+  const skipCnt=T.filter(t=>isSkip(t.k)).length;
   const pct=Math.round(doneKr/210*100);
+
+  // Check if skip choices will cause credit shortfalls
+  const catWarns=[];
+  CATS.forEach(cat=>{
+    const doneC=T.filter(t=>t.kat===cat.id&&isDone(t.k)).reduce((s,t)=>s+t.kr,0);
+    const availC=T.filter(t=>t.kat===cat.id&&!isSkip(t.k)&&!isDone(t.k)).reduce((s,t)=>s+t.kr,0);
+    const remaining=cat.needed-doneC;
+    if(remaining>0 && availC<remaining) catWarns.push(`${cat.label}: csak ${doneC+availC}/${cat.needed} kr érhető el!`);
+  });
+
   const sr=document.getElementById('statsRow');
   if(sr) sr.innerHTML=`
     <div class="stat-card"><div class="stat-label">Teljesített kredit</div><div class="stat-val">${doneKr}</div><div class="stat-sub">/ 210 szükséges</div></div>
-    <div class="stat-card"><div class="stat-label">Teljesített tárgy</div><div class="stat-val">${doneCnt}</div><div class="stat-sub">/ ${T.length} tárgy</div></div>
+    <div class="stat-card"><div class="stat-label">Teljesített tárgy</div><div class="stat-val">${doneCnt}</div><div class="stat-sub">${skipCnt>0?`⛔ ${skipCnt} kihagyva`:'/'+T.length+' tárgy'}</div></div>
     <div class="stat-card"><div class="stat-label">Összesített haladás</div><div class="stat-val">${pct}%</div><div class="stat-sub">${210-doneKr} kredit van még hátra</div></div>
     <div class="stat-card"><div class="stat-label">Tervezett következő félév</div><div class="stat-val">${P.length}</div><div class="stat-sub">${P.map(k=>getT(k)).filter(Boolean).reduce((s,t)=>s+t.kr,0)} kredit tervezve</div></div>
+    ${catWarns.length?`<div class="stat-card" style="grid-column:1/-1;border-color:var(--red);background:var(--red-bg)"><div class="stat-label" style="color:var(--red-text)">⚠️ Kredit hiány veszély – kihagyott tárgyak miatt</div><div style="font-size:12px;color:var(--red-text);margin-top:4px">${catWarns.join(' · ')}</div></div>`:''}
   `;
   const sb=document.getElementById('sidebarBar');
   const sp=document.getElementById('sidebarPct');
@@ -925,7 +952,7 @@ function renderPlanner(){
     return `<div class="warn-item">⚠️ <div><strong>${t.n}</strong><br>Hiányzó előfeltétel: ${miss.join(', ')}</div></div>`;
   }).join(''):`<div class="empty-state">Nincs figyelmeztetés ✓</div>`;
 
-  const avail=T.filter(t=>!isDone(t.k)&&!inPlan(t.k)&&preOk(t)).slice(0,10);
+  const avail=T.filter(t=>!isDone(t.k)&&!isSkip(t.k)&&!inPlan(t.k)&&preOk(t)).slice(0,10);
   const al=document.getElementById('availList');
   if(al) al.innerHTML=avail.length?avail.map(t=>`
     <div class="avail-item">
@@ -936,7 +963,7 @@ function renderPlanner(){
       <button class="add-btn" onclick="togglePlan('${t.k}')">+ Tervbe</button>
     </div>`).join(''):`<div class="empty-state">Jelölj teljesítettnek tárgyakat!</div>`;
 
-  const locked=T.filter(t=>!isDone(t.k)&&!preOk(t)&&t.pre.length>0).slice(0,8);
+  const locked=T.filter(t=>!isDone(t.k)&&!isSkip(t.k)&&!preOk(t)&&t.pre.length>0).slice(0,8);
   const ll=document.getElementById('lockedList');
   if(ll) ll.innerHTML=locked.length?locked.map(t=>{
     const miss=t.pre.filter(p=>!isDone(p)).map(p=>{const pt=getT(p);return pt?pt.n.split(' ').slice(0,2).join(' '):p;});
@@ -958,13 +985,20 @@ function renderProgress(){
   const pg=document.getElementById('progGrid');
   if(pg) pg.innerHTML=CATS.map(cat=>{
     const dk=T.filter(t=>t.kat===cat.id&&isDone(t.k)).reduce((s,t)=>s+t.kr,0);
+    const sk=T.filter(t=>t.kat===cat.id&&isSkip(t.k)).reduce((s,t)=>s+t.kr,0);
+    const avail=T.filter(t=>t.kat===cat.id&&!isSkip(t.k)&&!isDone(t.k)).reduce((s,t)=>s+t.kr,0);
     const pct=Math.min(100,Math.round(dk/cat.needed*100));
-    const color=pct>=100?'var(--green)':pct>50?'var(--amber)':'var(--blue)';
-    return `<div class="prog-cat">
-      <div class="prog-cat-title">${cat.label}</div>
-      <div class="prog-cat-sub">${dk} / ${cat.needed} kredit teljesítve</div>
+    const maxReachable=dk+avail;
+    const shortfall=maxReachable<cat.needed;
+    const color=shortfall?'var(--red)':pct>=100?'var(--green)':pct>50?'var(--amber)':'var(--blue)';
+    return `<div class="prog-cat" style="${shortfall?'border-color:var(--red);background:var(--red-bg)':''}">
+      <div class="prog-cat-title">${cat.label}${shortfall?` <span style="color:var(--red-text);font-size:11px">⚠️ Hiány!</span>`:''}</div>
+      <div class="prog-cat-sub">${dk} / ${cat.needed} kredit · ${sk>0?`⛔ ${sk} kr kihagyva`:''}</div>
       <div class="prog-cat-bar"><div class="prog-cat-fill" style="width:${pct}%;background:${color}"></div></div>
-      <div class="prog-cat-nums"><span>${pct}%</span><span>${cat.needed-dk} hátra</span></div>
+      <div class="prog-cat-nums">
+        <span>${pct}%</span>
+        <span style="color:${shortfall?'var(--red-text)':'var(--text3)'}">${shortfall?`max. ${maxReachable} kr érhető el!`:`${cat.needed-dk} hátra`}</span>
+      </div>
     </div>`;
   }).join('');
 
